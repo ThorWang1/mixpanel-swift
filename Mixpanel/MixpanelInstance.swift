@@ -394,7 +394,7 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
     #if !os(OSX) && !WATCH_OS
     private func setupListeners() {
         let notificationCenter = NotificationCenter.default
-        trackIntegration()
+        // trackIntegration()
         #if os(iOS) && !targetEnvironment(macCatalyst)
             setCurrentRadio()
             notificationCenter.addObserver(self,
