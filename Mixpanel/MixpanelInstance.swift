@@ -119,6 +119,12 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
             BasePath.namedBasePaths[name] = serverURL
         }
     }
+  
+    open var eventPath = FlushType.events.rawValue {
+        didSet {
+            BasePath.namedEventPaths[name] = eventPath
+        }
+    }
 
     open var debugDescription: String {
         return "Mixpanel(\n"

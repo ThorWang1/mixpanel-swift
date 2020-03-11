@@ -11,6 +11,32 @@ import Foundation
 import UIKit
 #endif // os(OSX)
 
+public typealias TrackingSuccessBlock<A> = (A, URLResponse?) -> ()
+public typealias TrackingFailureBlock = (Reason, Data?, URLResponse?) -> ()
+
+public protocol TrackingDelegate {
+  /**
+   Patch event before appending to queue.
+   
+   - parameter data: event data
+   
+   - returns: none
+   */
+  func patchEvent(_ data: inout [String: Any])
+  /**
+   Send track request.
+   
+   - parameter request: url request object
+   - parameter success: success callback
+   - parameter failure: failure callback
+   - returns: none
+   */
+  func executeRequest<A>(_ request: URLRequest,
+                         resource: Resource<A>,
+                         success: @escaping TrackingSuccessBlock<A>,
+                         failure: @escaping TrackingFailureBlock)
+}
+
 /// The primary class for integrating Mixpanel with your app.
 open class Mixpanel {
 
@@ -125,6 +151,15 @@ open class Mixpanel {
     open class func removeInstance(name: String) {
         MixpanelManager.sharedInstance.removeInstance(name: name)
     }
+  
+    open class var trackingDelegate: TrackingDelegate? {
+      get {
+        return MixpanelManager.sharedInstance.delegate
+      }
+      set {
+        MixpanelManager.sharedInstance.delegate = newValue
+      }
+    }
 }
 
 class MixpanelManager {
@@ -132,6 +167,8 @@ class MixpanelManager {
     static let sharedInstance = MixpanelManager()
     private var instances: [String: MixpanelInstance]
     private var mainInstance: MixpanelInstance?
+  
+    var delegate: TrackingDelegate?
 
     init() {
         instances = [String: MixpanelInstance]()

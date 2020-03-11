@@ -55,6 +55,7 @@ class Track {
             p["$duration"] = Double(String(format: "%.3f", epochInterval - eventStartTime))
         }
         p["distinct_id"] = distinctId
+        p["action_time"] = Int64(Date().timeIntervalSince1970 * 1000)
         if anonymousId != nil {
             p["$device_id"] = anonymousId
         }
@@ -66,11 +67,15 @@ class Track {
         }
         
         p += superProperties
-        if let properties = properties {
-            p += properties
+        guard var event = properties, var header = event["header"] as? [String : Any] else {
+          return (eventsQueue, shadowTimedEvents, p)
         }
-
-        var trackEvent: InternalProperties = ["event": ev!, "properties": p]
+        header += p
+        event["header"] = header
+        var trackEvent: InternalProperties = event
+        if let delegate = Mixpanel.trackingDelegate {
+          delegate.patchEvent(&trackEvent)
+        }
         metadata.toDict().forEach { (k,v) in trackEvent[k] = v }
         var shadowEventsQueue = eventsQueue
         

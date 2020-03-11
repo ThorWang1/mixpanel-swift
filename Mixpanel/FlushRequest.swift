@@ -19,7 +19,7 @@ class FlushRequest: Network {
     var networkRequestsAllowedAfterTime = 0.0
     var networkConsecutiveFailures = 0
 
-    func sendRequest(_ requestData: String,
+    func sendRequest(_ requestData: Data,
                      type: FlushType,
                      useIP: Bool,
                      completion: @escaping (Bool) -> Void) {
@@ -31,14 +31,15 @@ class FlushRequest: Network {
             }
             return nil
         }
+        var path = type.rawValue
+        if type == .events {
+          path = BasePath.getEventPath(identifier: basePathIdentifier)
+        }
 
-        let requestBody = "ip=\(useIP ? 1 : 0)&data=\(requestData)"
-            .data(using: String.Encoding.utf8)
-
-        let resource = Network.buildResource(path: type.rawValue,
+        let resource = Network.buildResource(path: path,
                                              method: .post,
-                                             requestBody: requestBody,
-                                             headers: ["Accept-Encoding": "gzip"],
+                                             requestBody: requestData,
+                                             headers: ["Accept-Encoding": "gzip", "Content-Type": "application/json"],
                                              parse: responseParser)
 
         flushRequestHandler(BasePath.getServerURL(identifier: basePathIdentifier),

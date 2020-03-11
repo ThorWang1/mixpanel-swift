@@ -125,10 +125,7 @@ class Flush: AppLifecycle {
             let batchSize = min(queue.count, APIConstants.batchSize)
             let range = 0..<batchSize
             let batch = Array(queue[range])
-            // Log data payload sent
-            Logger.debug(message: "Sending batch of data")
-            Logger.debug(message: batch as Any)
-            let requestData = JSONHandler.encodeAPIData(batch)
+            let requestData = JSONHandler.serializeJSONObject(batch)
             if let requestData = requestData {
                 let semaphore = DispatchSemaphore(value: 0)
                 #if os(iOS)

@@ -8,10 +8,17 @@
 
 import Foundation
 
+public enum Reason {
+  case parseError
+  case noData
+  case notOKStatusCode(statusCode: Int)
+  case other(Error)
+}
 
 struct BasePath {
     static let DefaultMixpanelAPI = "https://api.mixpanel.com"
     static var namedBasePaths = [String:String]()
+    static var namedEventPaths = [String:String]()
 
     static func buildURL(base: String, path: String, queryItems: [URLQueryItem]?) -> URL? {
         guard let url = URL(string: base) else {
@@ -26,27 +33,24 @@ struct BasePath {
     static func getServerURL(identifier: String) -> String {
         return namedBasePaths[identifier] ?? DefaultMixpanelAPI
     }
+  
+    static func getEventPath(identifier: String) -> String {
+      return namedEventPaths[identifier] ?? FlushType.events.rawValue
+    }
 }
 
-enum RequestMethod: String {
+public enum RequestMethod: String {
     case get
     case post
 }
 
-struct Resource<A> {
-    let path: String
-    let method: RequestMethod
-    let requestBody: Data?
-    let queryItems: [URLQueryItem]?
-    let headers: [String:String]
-    let parse: (Data) -> A?
-}
-
-enum Reason {
-    case parseError
-    case noData
-    case notOKStatusCode(statusCode: Int)
-    case other(Error)
+public struct Resource<A> {
+    public let path: String
+    public let method: RequestMethod
+    public let requestBody: Data?
+    public let queryItems: [URLQueryItem]?
+    public let headers: [String:String]
+    public let parse: (Data) -> A?
 }
 
 class Network {
@@ -64,32 +68,9 @@ class Network {
         guard let request = buildURLRequest(base, resource: resource) else {
             return
         }
-
-        URLSession.shared.dataTask(with: request) { (data, response, error) -> Void in
-            guard let httpResponse = response as? HTTPURLResponse else {
-
-                if let hasError = error {
-                    failure(.other(hasError), data, response)
-                } else {
-                    failure(.noData, data, response)
-                }
-                return
-            }
-            guard httpResponse.statusCode == 200 else {
-                failure(.notOKStatusCode(statusCode: httpResponse.statusCode), data, response)
-                return
-            }
-            guard let responseData = data else {
-                failure(.noData, data, response)
-                return
-            }
-            guard let result = resource.parse(responseData) else {
-                failure(.parseError, data, response)
-                return
-            }
-
-            success(result, response)
-        }.resume()
+        if let delegate = Mixpanel.trackingDelegate {
+          delegate.executeRequest(request, resource: resource, success: success, failure: failure)
+        }
     }
 
     private class func buildURLRequest<A>(_ base: String, resource: Resource<A>) -> URLRequest? {
@@ -99,8 +80,6 @@ class Network {
             return nil
         }
 
-        Logger.debug(message: "Fetching URL");
-        Logger.debug(message: url.absoluteURL);
         var request = URLRequest(url: url)
         request.httpMethod = resource.method.rawValue
         request.httpBody = resource.requestBody
