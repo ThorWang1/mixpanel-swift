@@ -141,7 +141,8 @@ public class MixpanelPushNotifications {
                 completionHandler()
                 return
             }
-
+            
+            #if !targetEnvironment(macCatalyst)
             UIApplication.shared.open(url, options: [:], completionHandler: { success in
                 if success {
                     Logger.debug(message: "Successfully loaded url: \(url)")
@@ -150,6 +151,7 @@ public class MixpanelPushNotifications {
                 }
                 completionHandler();
             })
+            #endif
 
         }
     }
@@ -177,9 +179,11 @@ public class MixpanelPushNotifications {
         properties["$ios_notification_id"] = request.identifier
 
         // Track using project token and distinct_id from push payload
+        #if DECIDE
         let mixpanel = Mixpanel.initialize(token: projectToken)
         mixpanel.trackPushNotification(userInfo, event: event, properties: properties)
         mixpanel.flush()
+        #endif
     }
 
 }

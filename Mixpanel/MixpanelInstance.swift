@@ -77,6 +77,10 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
     /// data to the Mixpanel servers. Defaults to true.
     open var showNetworkActivityIndicator = true
 
+    /// This allows enabling or disabling collecting common mobile events
+    /// If this is not set, it will query the Autotrack settings from the Mixpanel server
+    open var trackAutomaticEventsEnabled: Bool? = nil
+
     /// Flush timer's interval.
     /// Setting a flush interval of 0 will turn off the flush timer.
     open var flushInterval: Double {
@@ -259,7 +263,7 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
     var networkQueue: DispatchQueue!
     var optOutStatus: Bool?
     let readWriteLock: ReadWriteLock
-    #if os(iOS)
+    #if os(iOS) && !targetEnvironment(macCatalyst)
     static let reachability = SCNetworkReachabilityCreateWithName(nil, "api.mixpanel.com")
     static let telephonyInfo = CTTelephonyNetworkInfo()
     #endif
@@ -296,7 +300,7 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
                               metadata: sessionMetadata)
         networkQueue = DispatchQueue(label: "\(label).network)", qos: .utility)
 
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
             if let reachability = MixpanelInstance.reachability {
                 var context = SCNetworkReachabilityContext(version: 0, info: nil, retain: nil, release: nil, copyDescription: nil)
                 func reachabilityCallback(reachability: SCNetworkReachability, flags: SCNetworkReachabilityFlags, unsafePointer: UnsafeMutableRawPointer?) -> Void {
@@ -391,7 +395,7 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
     private func setupListeners() {
         let notificationCenter = NotificationCenter.default
         trackIntegration()
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
             setCurrentRadio()
             notificationCenter.addObserver(self,
                                            selector: #selector(setCurrentRadio),
@@ -454,7 +458,7 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-        #if os(iOS) && !WATCH_OS
+        #if os(iOS) && !WATCH_OS && !targetEnvironment(macCatalyst)
             if let reachability = MixpanelInstance.reachability {
                 if !SCNetworkReachabilitySetCallback(reachability, nil, nil) {
                     Logger.error(message: "\(self) error unsetting reachability callback")
@@ -598,7 +602,10 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
     #endif // os(OSX)
 
     @objc private func applicationWillTerminate(_ notification: Notification) {
-        self.archive()
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.archive()
+        }
     }
 
     func defaultDistinctId() -> String {
@@ -667,13 +674,27 @@ open class MixpanelInstance: CustomDebugStringConvertible, FlushDelegate, AEDele
             }
         }
     }
-    #if os(iOS)
+    #if os(iOS) && !targetEnvironment(macCatalyst)
     @objc func setCurrentRadio() {
-        var radio = MixpanelInstance.telephonyInfo.currentRadioAccessTechnology ?? "None"
+        var radio = ""
         let prefix = "CTRadioAccessTechnology"
-        if radio.hasPrefix(prefix) {
-            radio = (radio as NSString).substring(from: prefix.count)
+        if #available(iOS 12.0, *) {
+            if let radioDict = MixpanelInstance.telephonyInfo.serviceCurrentRadioAccessTechnology {
+                for (_, value) in radioDict {
+                    if value.count > 0 && value.hasPrefix(prefix) {
+                        let radioValue = (value as NSString).substring(from: prefix.count)
+                        radio = radio.count > 0 ? ", \(radioValue)" : radioValue
+                    }
+                }
+                radio = radio.count > 0 ? radio : "None"
+            }
+        } else {
+            radio = MixpanelInstance.telephonyInfo.currentRadioAccessTechnology ?? "None"
+            if radio.hasPrefix(prefix) {
+                radio = (radio as NSString).substring(from: prefix.count)
+            }
         }
+        
         trackingQueue.async {
             AutomaticProperties.automaticPropertiesLock.write { [weak self, radio] in
                 AutomaticProperties.properties["$radio"] = radio
@@ -728,30 +749,29 @@ extension MixpanelInstance {
     /**
      Sets the distinct ID of the current user.
 
-     Mixpanel will choose a default distinct ID based on whether you are using the
+     Mixpanel will choose a default local distinct ID based on whether you are using the
      AdSupport.framework or not.
 
      If you are not using the AdSupport Framework (iAds), then we use the IFV String
-     (`UIDevice.current().identifierForVendor`) as the default distinct ID. This ID will
+     (`UIDevice.current().identifierForVendor`) as the default local distinct ID. This ID will
      identify a user across all apps by the same vendor, but cannot be used to link the same
      user across apps from different vendors. If we are unable to get the IFV, we will fall
      back to generating a random persistent UUID
 
      If you are showing iAds in your application, you are allowed use the iOS ID
      for Advertising (IFA) to identify users. If you have this framework in your
-     app, Mixpanel will use the IFA as the default distinct ID. If you have
+     app, Mixpanel will use the IFA as the default local distinct ID. If you have
      AdSupport installed but still don't want to use the IFA, you can define the
      <code>MIXPANEL_NO_IFA</code> flag in your <code>Active Compilation Conditions</code>
-     build settings, and Mixpanel will use the IFV as the default distinct ID.
+     build settings, and Mixpanel will use the IFV as the default local distinct ID.
 
      If we are unable to get an IFA or IFV, we will fall back to generating a
      random persistent UUID. If you want to always use a random persistent UUID
      you can define the <code>MIXPANEL_RANDOM_DISTINCT_ID</code> preprocessor flag
      in your build settings.
 
-     For tracking events, you do not need to call `identify:` if you
-     want to use the default. However,
-     **Mixpanel People always requires an explicit call to `identify:`.**
+     For tracking events, you do not need to call `identify:`. However,
+     **Mixpanel User profiles always requires an explicit call to `identify:`.**
      If calls are made to
      `set:`, `increment` or other `People`
      methods prior to calling `identify:`, then they are queued up and
@@ -829,23 +849,19 @@ extension MixpanelInstance {
     }
 
     /**
-     Creates a distinctId alias from alias to the current id.
+     The alias method creates an alias which Mixpanel will use to remap one id to another.
+     Multiple aliases can point to the same identifier.
 
-     This method is used to map an identifier called an alias to the existing Mixpanel
-     distinct id. This causes all events and people requests sent with the alias to be
-     mapped back to the original distinct id. The recommended usage pattern is to call
-     createAlias: and then identify: (with their new user ID)
-     when they log in the next time. This will keep your signup funnels working
-     correctly.
-     This makes the current id and 'Alias' interchangeable distinct ids.
-     Mixpanel.
-     mixpanelInstance.createAlias("Alias", mixpanelInstance.distinctId)
 
-     - precondition: You must call identify if you haven't already
-     (e.g. when your app launches)
+     `mixpanelInstance.createAlias("New ID", distinctId: mixpanelInstance.distinctId)`
 
-     - parameter alias:      the new distinct id that should represent the original
-     - parameter distinctId: the old distinct id that alias will be mapped to
+     You can add multiple id aliases to the existing id
+
+     `mixpanelInstance.createAlias("Newer ID", distinctId: mixpanelInstance.distinctId)`
+
+
+     - parameter alias:      A unique identifier that you want to use as an identifier for this user.
+     - parameter distinctId: The current user identifier.
      - parameter usePeople: boolean that controls whether or not to set the people distinctId to the event distinctId.
      This should only be set to false if you wish to prevent people profile updates for that user.
      */
@@ -970,7 +986,7 @@ extension MixpanelInstance {
                                                 peopleDistinctId: people.distinctId,
                                                 peopleUnidentifiedQueue: people.unidentifiedQueue,
                                                 shownNotifications: decideInstance.notificationsInstance.shownNotifications,
-                                                automaticEventsEnabled: decideInstance.automaticEventsEnabled)
+                                                automaticEventsEnabled: trackAutomaticEventsEnabled ?? decideInstance.automaticEventsEnabled)
             Persistence.archive(eventsQueue: flushEventsQueue + eventsQueue,
                                 peopleQueue: people.flushPeopleQueue + people.peopleQueue,
                                 groupsQueue: flushGroupsQueue + groupsQueue,
@@ -1052,7 +1068,7 @@ extension MixpanelInstance {
                                                 peopleDistinctId: people.distinctId,
                                                 peopleUnidentifiedQueue: people.unidentifiedQueue,
                                                 shownNotifications: decideInstance.notificationsInstance.shownNotifications,
-                                                automaticEventsEnabled: decideInstance.automaticEventsEnabled)
+                                                automaticEventsEnabled: trackAutomaticEventsEnabled ?? decideInstance.automaticEventsEnabled)
             Persistence.archiveProperties(properties, token: apiToken)
         }
     }
@@ -1153,7 +1169,7 @@ extension MixpanelInstance {
                 }
 
                 #if DECIDE
-                let automaticEventsEnabled = self.decideInstance.automaticEventsEnabled
+                let automaticEventsEnabled = self.trackAutomaticEventsEnabled ?? self.decideInstance.automaticEventsEnabled
                 #elseif TV_AUTO_EVENTS
                 let automaticEventsEnabled = true
                 #else
@@ -1196,6 +1212,21 @@ extension MixpanelInstance {
                 }
             }
         }}
+    
+    
+    func updateQueue(_ queue: Queue, type: FlushType) {
+        self.readWriteLock.write {
+            if type == .events {
+                self.flushEventsQueue = queue
+            } else if type == .people {
+                self.people.flushPeopleQueue = queue
+            } else if type == .groups {
+                self.flushGroupsQueue = queue
+            }
+        }
+        
+        self.archive()
+    }
 }
 
 extension MixpanelInstance {
@@ -1218,10 +1249,6 @@ extension MixpanelInstance {
             return
         }
         let epochInterval = Date().timeIntervalSince1970
-
-
-       // }
-
         trackingQueue.async { [weak self, event, properties, epochInterval] in
             guard let self = self else { return }
             var shadowEventsQueue = Queue()
@@ -1575,7 +1602,7 @@ extension MixpanelInstance {
 
             if let oldValue = oldValue as? Array<MixpanelType> {
                 var vals = oldValue
-                if !vals.contains {$0.equals(rhs: groupID)} {
+                if !vals.contains(where: { $0.equals(rhs: groupID) }) {
                     vals.append(groupID)
                     superProperties[groupKey] = vals
                 }
@@ -1645,24 +1672,28 @@ extension MixpanelInstance {
 
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
-            
-            self.readWriteLock.write { [weak self] in
-
+            self.networkQueue.async { [weak self] in
                 guard let self = self else {
                     return
                 }
+                self.readWriteLock.write { [weak self] in
 
-                self.alias = nil
-                self.people.distinctId = nil
-                self.userId = nil
-                self.distinctId = self.defaultDistinctId()
-                self.anonymousId = self.distinctId
-                self.hadPersistedDistinctId = nil
-                self.superProperties = InternalProperties()
-                self.people.unidentifiedQueue = Queue()
-                self.timedEvents = InternalProperties()
+                    guard let self = self else {
+                        return
+                    }
+
+                    self.alias = nil
+                    self.people.distinctId = nil
+                    self.userId = nil
+                    self.distinctId = self.defaultDistinctId()
+                    self.anonymousId = self.distinctId
+                    self.hadPersistedDistinctId = nil
+                    self.superProperties = InternalProperties()
+                    self.people.unidentifiedQueue = Queue()
+                    self.timedEvents = InternalProperties()
+                }
+                self.archive()
             }
-            self.archive()
         }
 
         optOutStatus = true

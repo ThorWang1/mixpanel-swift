@@ -10,6 +10,7 @@ import Foundation
 
 protocol FlushDelegate {
     func flush(completion: (() -> Void)?)
+    func updateQueue(_ queue: Queue, type: FlushType)
     #if os(iOS)
     func updateNetworkActivityIndicator(_ on: Bool)
     #endif // os(iOS)
@@ -122,9 +123,9 @@ class Flush: AppLifecycle {
         var mutableQueue = queue
         while !mutableQueue.isEmpty {
             var shouldContinue = false
-            let batchSize = min(queue.count, APIConstants.batchSize)
+            let batchSize = min(mutableQueue.count, APIConstants.batchSize)
             let range = 0..<batchSize
-            let batch = Array(queue[range])
+            let batch = Array(mutableQueue[range])
             // Log data payload sent
             Logger.debug(message: "Sending batch of data")
             Logger.debug(message: batch as Any)
@@ -153,6 +154,7 @@ class Flush: AppLifecycle {
                                                 } else {
                                                     shadowQueue.removeAll()
                                                 }
+                                                self?.delegate?.updateQueue(shadowQueue, type: type)
                                             }
                                             shouldContinue = success
                                             semaphore.signal()
