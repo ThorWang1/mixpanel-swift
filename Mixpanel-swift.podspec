@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.swift_version = '5.0'
   s.homepage = 'https://mixpanel.com'
   s.author       = { 'Mixpanel, Inc' => 'support@mixpanel.com' }
-  s.source       = { :git => 'https://github.com/mixpanel/mixpanel-swift.git',
+  s.source       = { :git => 'https://github.com/ThorWang1/mixpanel-swift.git',
                      :tag => "v#{s.version}" }
   s.ios.deployment_target = '8.0'
   s.ios.resources = ['Mixpanel/**/*.{png,xib,storyboard}']
