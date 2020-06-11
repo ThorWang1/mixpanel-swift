@@ -1,5 +1,5 @@
 Pod::Spec.new do |s|
-  s.name = 'Mixpanel-swift'
+  s.name = 'MixpanelSwift'
   s.version = '2.7.3.1'
   s.module_name = 'Mixpanel'
   s.license = 'Apache License, Version 2.0'
